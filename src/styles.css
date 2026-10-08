@@ -1,0 +1,37 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* 点击穿透：页面内所有元素都不接收鼠标事件（配合 Tauri 窗口忽略光标事件） */
+  pointer-events: none;
+}
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", Avenir, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: #ffffff; /* 默认正常模式：白底、可交互 */
+  overflow: hidden;
+}
+
+/* 穿透模式（托盘勾选「允许点击穿透」）：透明背景，仅显示表盘 */
+html.penetrate,
+html.penetrate body {
+  background: transparent;
+}
+
+/* ---------- 模拟表盘时钟（迁移自 flag.html） ---------- */
+#dialClock {
+  position: fixed;
+  display: none; /* 由 JS 根据窗口尺寸切换显示 */
+  z-index: 5;
+  /* 阴影已改由 canvas 内部绘制（避免被透明窗口矩形边界裁平），
+     这里不再加 CSS filter / box-shadow。 */
+}

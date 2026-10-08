@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Desktop Clock</title>
+  </head>
+
+  <body>
+    <!-- 模拟表盘时钟（迁移自 flag.html，已去除顶部数字时钟） -->
+    <canvas id="dialClock"></canvas>
+
+    <!-- 表盘时钟绘制逻辑 -->
+    <script>
+      (function () {
+        var canvas = document.getElementById("dialClock");
+        if (!canvas) return;
+        var ctx = canvas.getContext("2d");
+        // 窗口内边距：必须明显大于 drop-shadow 的延伸量（偏移4 + 模糊12 ≈16），
+        // 否则四周边距不足，阴影会被透明窗口边界裁切，出现「突兀/被切掉」的感觉。
+        var PAD = 40,
+          MIN_D = 60; // 窗口内边距 / 表盘最小直径
+
+        // 计算位置与尺寸：表盘居中铺满窗口（不再依赖顶部文字时钟）
+        // 每帧重算，窗口缩放时自动跟随
+        function layout() {
+          var vw = document.documentElement.clientWidth;
+          var vh = document.documentElement.clientHeight;
+          var availW = vw - PAD * 2;
+          var availH = vh - PAD * 2;
+          var d = Math.min(availW, availH); // 取较小边，保证圆形完整且留边距
+          if (d < MIN_D) {
+            canvas.style.display = "none";
+            return 0;
+          }
+          var cx = vw / 2;
+          var cy = vh / 2;
+          var dpr = window.devicePixelRatio || 1;
+          var px = Math.round(d * dpr);
+          if (canvas.width !== px) {
+            canvas.width = px;
+            canvas.height = px;
+          }
+          canvas.style.width = d + "px";
+          canvas.style.height = d + "px";
+          canvas.style.left = cx - d / 2 + "px";
+          canvas.style.top = cy - d / 2 + "px";
+          canvas.style.display = "block";
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, d, d);
+          return d;
+        }
+
+        function hand(c, r, angle, len, w, color, tail) {
+          ctx.save();
+          ctx.translate(c, c);
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.moveTo(0, tail);
+          ctx.lineTo(0, -len);
+          ctx.lineWidth = w;
+          ctx.lineCap = "round";
+          ctx.strokeStyle = color;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        window.drawDialClock = function (now) {
+          var d = layout();
+          if (!d) return;
+          var c = d / 2;
+          // 表盘半径：在画布内留约 5% 余量，给阴影 halo 让出空间，
+          // 这样阴影画在画布内部、随圆形走，四边都不会被窗口矩形边界裁平。
+          var R = d / 2 - Math.max(2, d * 0.05);
+          var i, a;
+
+          // 表盘底盘 + 阴影（阴影绘入画布内部，四边对称、不偏移，避免被裁成平面）
+          ctx.save();
+          ctx.shadowColor = "rgba(0,0,0,0.28)";
+          ctx.shadowBlur = d * 0.04;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.beginPath();
+          ctx.arc(c, c, R, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.fill();
+          ctx.restore(); // 关闭阴影，后续刻度/指针不再带阴影
+
+          // 表盘描边
+          ctx.beginPath();
+          ctx.arc(c, c, R, 0, Math.PI * 2);
+          ctx.lineWidth = Math.max(1, d * 0.018);
+          ctx.strokeStyle = "#d5d9e0";
+          ctx.stroke();
+
+          // 刻度（60 格，整点加粗）
+          for (i = 0; i < 60; i++) {
+            var isHour = i % 5 === 0;
+            a = ((i * 6 - 90) * Math.PI) / 180;
+            var len = isHour ? R * 0.1 : R * 0.05;
+            var x1 = c + Math.cos(a) * (R * 0.94);
+            var y1 = c + Math.sin(a) * (R * 0.94);
+            var x2 = c + Math.cos(a) * (R * 0.94 - len);
+            var y2 = c + Math.sin(a) * (R * 0.94 - len);
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.lineWidth = isHour
+              ? Math.max(1.2, d * 0.018)
+              : Math.max(0.6, d * 0.008);
+            ctx.strokeStyle = isHour ? "#8a8f99" : "#c8ccd4";
+            ctx.stroke();
+          }
+
+          // 数字：3/6/9/12 恒显示；表盘够大时显示 1~12
+          var big = d >= 96;
+          var fs = Math.max(8, d * 0.12);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          for (i = 1; i <= 12; i++) {
+            var isMain = i % 3 === 0;
+            if (!isMain && !big) continue;
+            a = ((i * 30 - 90) * Math.PI) / 180;
+            ctx.font =
+              (isMain ? "600 " : "400 ") +
+              fs +
+              'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = isMain ? "#333333" : "#9aa0ab";
+            ctx.fillText(
+              String(i),
+              c + Math.cos(a) * R * 0.68,
+              c + Math.sin(a) * R * 0.68
+            );
+          }
+
+          // 指针（按秒取整，300ms 刷新时整秒才跳一格）
+          var hh = Math.floor(now.getHours()) % 12;
+          var mm = Math.floor(now.getMinutes());
+          var ss = Math.floor(now.getSeconds());
+          hand(c, R, (hh + mm / 60 + ss / 3600) * (Math.PI / 6), R * 0.48, Math.max(2, d * 0.035), "#333333", R * 0.1);
+          hand(c, R, (mm + ss / 60) * (Math.PI / 30), R * 0.7, Math.max(1.6, d * 0.024), "#555555", R * 0.12);
+          hand(c, R, ss * (Math.PI / 30), R * 0.8, Math.max(1, d * 0.012), "#c0392b", R * 0.16);
+
+          // 中心点
+          ctx.beginPath();
+          ctx.arc(c, c, Math.max(1.5, d * 0.022), 0, Math.PI * 2);
+          ctx.fillStyle = "#c0392b";
+          ctx.fill();
+        };
+      })();
+    </script>
+
+    <!-- 时钟刷新逻辑（仅驱动表盘） -->
+    <script>
+      (function () {
+        function updateClock() {
+          var now = new Date();
+          if (window.drawDialClock) window.drawDialClock(now);
+        }
+        updateClock();
+        setInterval(updateClock, 300);
+      })();
+    </script>
+
+    <!-- 托盘开关状态 + 窗口尺寸/位置 持久化（localStorage） -->
+    <script>
+      (function () {
+        var KEY_SIZE = "desktop_clock.window.size";
+        var KEY_POS = "desktop_clock.window.pos";
+        var KEY_PEN = "desktop_clock.state.penetrate";
+        var KEY_TOP = "desktop_clock.state.always_on_top";
+        var RESTORE_FLAG = "desktop_clock.restored";
+        var t = window.__TAURI__;
+
+        function readJSON(key) {
+          try {
+            return JSON.parse(localStorage.getItem(key) || "null");
+          } catch (e) {
+            return null;
+          }
+        }
+        function writeJSON(key, val) {
+          try {
+            localStorage.setItem(key, JSON.stringify(val));
+          } catch (e) {}
+        }
+
+        if (!t || !t.window || !t.core) return;
+
+        var win = t.window.getCurrentWindow();
+        var pending = { size: null, pos: null };
+        var timer = null;
+        // 切换穿透状态时窗口边框会变化并触发一次尺寸抖动，
+        // 这段时间内产生的尺寸变化不应被持久化，否则大小会在两种模式间来回漂移。
+        var suppressUntil = 0;
+
+        function flush() {
+          if (pending.size) writeJSON(KEY_SIZE, pending.size);
+          if (pending.pos) writeJSON(KEY_POS, pending.pos);
+          pending.size = null;
+          pending.pos = null;
+        }
+        function schedule() {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(flush, 400);
+        }
+
+        if (win.onResized) {
+          win.onResized(function (e) {
+            if (Date.now() < suppressUntil) return;
+            pending.size = { width: e.payload.width, height: e.payload.height };
+            schedule();
+          });
+        }
+        if (win.onMoved) {
+          win.onMoved(function (e) {
+            if (Date.now() < suppressUntil) return;
+            pending.pos = { x: e.payload.x, y: e.payload.y };
+            schedule();
+          });
+        }
+
+        // 退出前兜底落盘，避免最后一次拖动/缩放还没到 400ms 就被关掉
+        window.addEventListener("beforeunload", flush);
+        window.addEventListener("pagehide", flush);
+
+        // 穿透开关：切换 CSS 背景（透明 / 白底）并落盘
+        function setPenetrate(on) {
+          // 忽略这次切换带来的尺寸抖动（去掉/恢复边框会触发一次 resize）
+          suppressUntil = Date.now() + 800;
+          document.documentElement.classList.toggle("penetrate", on);
+          writeJSON(KEY_PEN, on);
+        }
+        try {
+          t.event.listen("penetrate-change", function (e) {
+            setPenetrate(!!e.payload); // true = 穿透（透明）；false = 正常（白底）
+          });
+        } catch (err) {}
+
+        // 置顶开关：落盘
+        try {
+          t.event.listen("always-on-top-change", function (e) {
+            writeJSON(KEY_TOP, !!e.payload);
+          });
+        } catch (err) {}
+
+        // 首次启动：从 localStorage 读取并恢复窗口尺寸/位置 与 托盘开关状态
+        // （用 sessionStorage 标记，避免页面重载时把窗口又拉回旧位置/旧状态）
+        try {
+          if (sessionStorage.getItem(RESTORE_FLAG)) return;
+          sessionStorage.setItem(RESTORE_FLAG, "1");
+
+          var s = readJSON(KEY_SIZE);
+          var p = readJSON(KEY_POS);
+          if (
+            s &&
+            p &&
+            typeof s.width === "number" &&
+            typeof s.height === "number" &&
+            typeof p.x === "number" &&
+            typeof p.y === "number"
+          ) {
+            t.core.invoke("restore_window_state", {
+              x: p.x,
+              y: p.y,
+              width: s.width,
+              height: s.height,
+            });
+          }
+
+          // 托盘开关状态：没存过的用默认值（穿透=false，置顶=true）
+          var pen = readJSON(KEY_PEN);
+          var top = readJSON(KEY_TOP);
+          if (pen !== null || top !== null) {
+            var penetrate = pen === true;
+            var alwaysOnTop = top === null ? true : top === true;
+            // 先自己切 CSS，不等 Rust 的事件（事件可能早于监听注册完成而丢失）
+            setPenetrate(penetrate);
+            t.core.invoke("restore_app_state", {
+              penetrate: penetrate,
+              alwaysOnTop: alwaysOnTop,
+            });
+          }
+        } catch (err) {
+          /* 非 Tauri 环境（如浏览器预览）或读取失败时忽略 */
+        }
+      })();
+    </script>
+  </body>
+</html>
